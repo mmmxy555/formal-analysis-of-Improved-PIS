@@ -1,0 +1,138 @@
+theory CloudCompute
+begin
+builtins:	asymmetric-encryption,symmetric-encryption,hashing
+functions: pair/2,set/3,true/0,Commutative/2,mul/2[private]
+// equations: Intersection(set(a,b,c),set(b,c,d))=b
+equations: Commutative(senc(senc(data,sk1),sk2),senc(senc(data,sk2),sk1))=true
+
+rule pair_key:
+    [ Fr(~ltkA),
+      Fr(~ltkB) ]
+    -->
+    [   !Pair_key(~ltkA,h(~ltkB)),
+        !Pair_key(~ltkB,h(~ltkA)) ]
+rule Register_Paillier_pk:
+  [ Fr(~ltkA) ]
+  -->
+  [ !Ltk_Paillier($A, ~ltkA), 
+    !Pk_Paillier($A, pk(~ltkA)), 
+    Out(pk(~ltkA)) ]
+
+rule Init:
+  let
+    set_client=<  pair(~data1,~cost1),
+                  pair(~data2,~cost2),
+                  pair(~data3,~cost3) >
+    set_server=<  ~data2,~data3,~data4 >
+  in
+    [ Fr(~data1),Fr(~data2),Fr(~data3),Fr(~data4),
+      Fr(~cost1),Fr(~cost2),Fr(~cost3),Fr(~cost4) ]
+  --[ Init() ]->//only once
+    [ !Set_client(set_client),
+      !Set_server(set_server) ]
+rule Server_1:
+  let
+    
+    // C1=<data2^sk_S,data3^sk_S,data4^sk_S>
+    set_server=<  data2,data3,data4 >
+    m2=senc(data2,sk_S)
+    m3=senc(data3,sk_S)
+    m4=senc(data4,sk_S)
+    C1=<m2,m3,m4>
+    
+  in
+    [ !Set_server(set_server),!Pair_key(sk_S,h(sk_C)) ]
+  --[ Server_1_m() ]->
+    [ Out(C1),Server_1(sk_S,sk_C,set_server) ]
+rule Client_1:
+  let
+    set_client=<  pair(data1,cost1),
+                  pair(data2,cost2),
+                  pair(data3,cost3) >
+    
+    p1=<senc(data1,sk_C),aenc(cost1,pk(psk))>
+    p2=<senc(data2,sk_C),aenc(cost2,pk(psk))>
+    p3=<senc(data3,sk_C),aenc(cost3,pk(psk))>
+    C2=<p1,p2,p3>
+    
+    d2=senc(m2,sk_C)
+    d3=senc(m3,sk_C)
+    d4=senc(m4,sk_C)
+    C3=<d2,d3,d4>
+  in
+    [ !Set_client(set_client), 
+      !Pair_key(sk_C,h(sk_S)),
+      !Pk_Paillier($Client, pk(psk)),
+      In(<m2,m3,m4>)]
+  --[ Client_1_m() ]->
+    [ Out(<C2,C3>),
+      Client_1(set_client,sk_C,psk) ]
+
+rule Server_2:
+  let
+    set_server=< data2,data3,data4 >
+    
+    p1=<fp1,sp1>
+    p2=<fp2,sp2>
+    p3=<fp3,sp3>
+    C2=<p1,p2,p3>
+    C3=<d2,d3,d4>
+  in
+    [ Server_1(sk_S,sk_C,set_server),
+      In(<C2,C3>) ]
+  --[ Eq(Commutative(d2,senc(fp2,sk_S)),true) ,
+      Eq(Commutative(d3,senc(fp3,sk_S)),true) ,
+      Finishm()
+    ]->
+    [ Out(mul(sp2,sp3)),Server_2(sk_S,sk_C,set_server) ]
+
+rule Client_2:
+  let
+    set_client=<  pair(data1,cost1),
+                  pair(data2,cost2),
+                  pair(data3,cost3) >
+  in
+    [ In(IntersectionSum),Client_1(set_client,sk_C,psk) ]
+  --[ Eq(IntersectionSum,mul(aenc(cost2,pk(psk)),aenc(cost3,pk(psk)) ) ),
+      Finish(data2,cost2,data3,cost3) ]->
+    [  ]
+
+restriction Eq:
+"
+    All x y #i. Eq(x,y) @ i ==> x = y
+"
+restriction unique_init:
+"
+    All #i #j. Init() @i & Init() @j ==> #i =#j
+"
+restriction unique_Server:
+"
+    All #i #j. Client_1_m() @i & Client_1_m() @j ==> #i =#j
+"
+restriction unique_client:
+"
+    All #i #j. Server_1_m() @i & Server_1_m() @j ==> #i =#j
+"
+lemma reachable:
+  exists-trace
+  " Ex m1 m2 c1 c2 #i.
+        Finish(m1,m2,c1,c2) @ i
+  "
+
+lemma Identification_Secrecy:
+"
+    All d1 c1 d2 c2 #i.
+        Finish(d1,c1,d2,c2) @ i ==> 
+        not (Ex #j. K(d1)@j)
+          | (Ex #j. K(d2)@j)
+"
+
+lemma Related_data_Secrecy:
+"
+    All d1 c1 d2 c2 #i.
+        Finish(d1,c1,d2,c2) @ i ==> 
+        not (Ex #j. K(c1)@j)
+          | (Ex #j. K(c2)@j)
+"
+
+end
